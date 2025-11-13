@@ -1,0 +1,18 @@
+run = "npm run dev"
+entrypoint = "backend/src/server.ts"
+hidden = [".config", "package-lock.json"]
+
+[nix]
+channel = "stable-22_11"
+
+[deployment]
+run = ["sh", "-c", "npm run build && npm run dev:server"]
+deploymentTarget = "cloudrun"
+
+[[ports]]
+localPort = 3000
+externalPort = 80
+
+[[ports]]
+localPort = 5173
+externalPort = 3000

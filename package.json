@@ -1,0 +1,27 @@
+{
+  "name": "realleads-ai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Voice-first, AI-native real estate CRM with autonomous follow-up orchestration",
+  "workspaces": [
+    "backend",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:web\"",
+    "dev:server": "cd backend && npm run dev",
+    "dev:web": "cd web && npm run dev",
+    "build": "npm run build:server && npm run build:web",
+    "build:server": "cd backend && npm run build",
+    "build:web": "cd web && npm run build",
+    "seed": "cd backend && npm run seed",
+    "test:integrations": "cd backend && npm run test:integrations"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}
