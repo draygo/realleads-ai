@@ -1,15 +1,13 @@
 // backend/src/routes/command.ts
 // Basic placeholder router for command-related endpoints.
 
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 
-const router = Router();
+export const commandRouter = Router();
 
 // Example health/check endpoint for commands
-router.get('/health', (_req, res) => {
+commandRouter.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', source: 'command-route' });
 });
 
 // TODO: add real command/voice/AI endpoints here
-
-export default router;
