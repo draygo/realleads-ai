@@ -2,40 +2,54 @@
 import { supabase } from './client';
 
 // Import the Lead type definition
-import { Lead } from '../../shared/types';
+import { Lead } from '../../../shared/types';
+
+// Re-export Lead type for convenience
+export type { Lead };
 
 /**
- * Fetches leads from the database, optionally filtering by status, market area, segment, owner_agent_id, and limit.
+ * Fetches leads from the database for a specific agent, optionally filtering by status, segments, tags, search, and more.
+ * @param agentId ID of the agent whose leads to fetch.
  * @param filters Optional filters to query leads table.
  * @returns Promise resolving to an array of Lead objects.
  */
-export async function getLeads(filters?: {
-  status?: string;
-  market_area?: string;
-  segment?: string;
-  owner_agent_id?: string;
-  limit?: number;
-}): Promise<Lead[]> {
+export async function getLeads(
+  agentId: string,
+  filters?: {
+    status?: string;
+    segments?: string[];
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }
+): Promise<Lead[]> {
   // Begin query from the leads table, selecting all columns
   let query = supabase
     .from('leads')
-    .select('*');
+    .select('*')
+    .eq('owner_agent_id', agentId);
 
   // Apply filters dynamically if provided
   if (filters) {
     if (filters.status) {
       query = query.eq('status', filters.status);
     }
-    if (filters.market_area) {
-      query = query.eq('market_area', filters.market_area);
+    if (filters.segments && filters.segments.length > 0) {
+      // Filter by segments array (contains any of the specified segments)
+      query = query.contains('segments', filters.segments);
     }
-    if (filters.segment) {
-      query = query.eq('segment', filters.segment);
+    if (filters.search) {
+      // Search in first_name, last_name, email, or phone
+      query = query.or(
+        `first_name.ilike.%${filters.search}%,` +
+        `last_name.ilike.%${filters.search}%,` +
+        `email.ilike.%${filters.search}%,` +
+        `phone.ilike.%${filters.search}%`
+      );
     }
-    if (filters.owner_agent_id) {
-      query = query.eq('owner_agent_id', filters.owner_agent_id);
-    }
-    if (filters.limit && typeof filters.limit === 'number') {
+    if (filters.offset && typeof filters.offset === 'number') {
+      query = query.range(filters.offset, filters.offset + (filters.limit || 50) - 1);
+    } else if (filters.limit && typeof filters.limit === 'number') {
       query = query.limit(filters.limit);
     }
   }
@@ -43,7 +57,6 @@ export async function getLeads(filters?: {
   // Perform query execution and handle errors
   const { data, error } = await query;
   if (error) {
-    // Consider adding app-specific error logging here
     throw new Error(`Error fetching leads: ${error.message}`);
   }
   // Return the fetched leads, or empty array if none found

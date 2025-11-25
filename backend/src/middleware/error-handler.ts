@@ -5,6 +5,45 @@ import { Request, Response, NextFunction } from 'express';
 import { logger } from './logger';
 
 /**
+ * Custom validation error class for business logic validation failures
+ */
+export class ValidationError extends Error {
+  statusCode: number = 400;
+  
+  constructor(message: string) {
+    super(message);
+    this.name = 'ValidationError';
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
+
+/**
+ * Custom not found error class for missing resources
+ */
+export class NotFoundError extends Error {
+  statusCode: number = 404;
+  
+  constructor(message: string) {
+    super(message);
+    this.name = 'NotFoundError';
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
+
+/**
+ * Custom unauthorized error class for authentication failures
+ */
+export class UnauthorizedError extends Error {
+  statusCode: number = 401;
+  
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnauthorizedError';
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
+
+/**
  * Global error handler for Express applications.
  * Catches all errors and sends consistent JSON error responses.
  * 

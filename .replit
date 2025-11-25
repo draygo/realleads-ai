@@ -1,6 +1,7 @@
 run = "npm run dev"
 entrypoint = "backend/src/server.ts"
 hidden = [".config", "package-lock.json"]
+modules = ["nodejs-20"]
 
 [nix]
 channel = "stable-22_11"
@@ -38,7 +39,7 @@ localPort = 8789
 externalPort = 3003
 
 [[ports]]
-localPort = 41733
+localPort = 45121
 externalPort = 5000
 
 [agent]
