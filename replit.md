@@ -106,6 +106,12 @@ bash start-backend.sh
 - Multi-channel messaging (SMS, WhatsApp, Email)
 - RESTful API for dashboard integration
 
+## Database Schema Notes
+- **Lead Status Values**: 'New' | 'Nurture' | 'Hot' | 'Closed' | 'Lost' (capitalized)
+- **Agent ID Column**: Uses `owner_agent_id` (not `agent_id`)
+- **Tags Column**: Not present in current schema (filtering by tags removed)
+
 ## Recent Changes
+- **2025-11-25**: Fixed status enum alignment across validators, shared types, and database queries. Updated agent_id to owner_agent_id. Removed tags filtering to match schema.
 - **2025-11-25**: Backend fully operational with all secrets configured
 - **2025-11-14**: Initial project setup and GitHub sync configured
