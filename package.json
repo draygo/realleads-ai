@@ -23,5 +23,9 @@
   "engines": {
     "node": ">=18.0.0",
     "npm": ">=9.0.0"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.81.1",
+    "react-router-dom": "^7.9.6"
   }
 }
