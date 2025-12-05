@@ -20,6 +20,51 @@
 import { z } from 'zod';
 
 // ============================================================================
+// Custom Validators
+// ============================================================================
+
+/**
+ * Phone number validator
+ * - Accepts: 5551234567, 555-123-4567, (555) 123-4567, etc.
+ * - Validates: Must be exactly 10 digits
+ * - Transforms to: xxx-xxx-xxxx format
+ */
+const phoneSchema = z
+  .string()
+  .transform((val) => {
+    // Remove all non-digit characters
+    const digitsOnly = val.replace(/\D/g, '');
+    return digitsOnly;
+  })
+  .refine((val) => val.length === 10, {
+    message: 'Phone number must be exactly 10 digits (including area code)',
+  })
+  .transform((val) => {
+    // Format as xxx-xxx-xxxx
+    return `${val.slice(0, 3)}-${val.slice(3, 6)}-${val.slice(6, 10)}`;
+  });
+
+/**
+ * Email validator
+ * - Must contain @ symbol
+ * - Must have . after the @
+ * - Uses standard email validation
+ */
+const emailSchema = z
+  .string()
+  .email('Invalid email format')
+  .refine(
+    (email) => {
+      const atIndex = email.indexOf('@');
+      const dotAfterAt = email.indexOf('.', atIndex);
+      return atIndex > 0 && dotAfterAt > atIndex;
+    },
+    {
+      message: 'Email must contain @ symbol and a domain with a period (.)',
+    }
+  );
+
+// ============================================================================
 // Lead Action Validators
 // ============================================================================
 
@@ -30,17 +75,19 @@ import { z } from 'zod';
 export const CreateLeadSchema = z.object({
   first_name: z.string().min(1, 'First name is required'),
   last_name: z.string().optional(),
-  email: z.string().email('Invalid email format').optional(),
-  phone: z.string().optional(),
+  email: emailSchema.optional(),
+  phone: phoneSchema.optional(),
   property_address: z.string().optional(),
   neighborhood: z.string().optional(),
   beds: z.number().int().positive().optional(),
   baths: z.number().positive().optional(), // Can be decimal (e.g., 1.5)
   price_range: z.string().optional(),
+  budget_min: z.number().positive().optional(),
   budget_max: z.number().positive().optional(),
   source: z.string().optional(),
-  status: z.enum(['New', 'Nurture', 'Hot', 'Closed', 'Lost']).optional(),
+  status: z.enum(['new', 'contacted', 'qualified', 'closed', 'lost']).optional(),
   segments: z.array(z.string()).optional(),
+  tags: z.array(z.string()).optional(),
   notes: z.string().optional(),
 });
 
@@ -49,13 +96,16 @@ export const CreateLeadSchema = z.object({
  * Allows filtering by various criteria
  */
 export const GetLeadsSchema = z.object({
-  status: z.enum(['New', 'Nurture', 'Hot', 'Closed', 'Lost']).optional(),
+  status: z.enum(['new', 'contacted', 'qualified', 'closed', 'lost']).optional(),
   segments: z.array(z.string()).optional(),
+  tags: z.array(z.string()).optional(),
+  email: z.string().optional(), // Filter by exact email
+  phone: z.string().optional(), // Filter by phone
+  neighborhood: z.string().optional(), // Filter by neighborhood
   search: z.string().optional(), // Search in name, email, phone
   limit: z.number().int().positive().max(100).optional(),
   offset: z.number().int().nonnegative().optional(),
 });
-
 /**
  * Validator for update_lead action
  * Similar to create but requires lead_id
@@ -64,8 +114,8 @@ export const UpdateLeadSchema = z.object({
   lead_id: z.string().uuid('Invalid lead ID format'),
   first_name: z.string().min(1).optional(),
   last_name: z.string().optional(),
-  email: z.string().email().optional(),
-  phone: z.string().optional(),
+  email: emailSchema.optional(),
+  phone: phoneSchema.optional(),
   property_address: z.string().optional(),
   neighborhood: z.string().optional(),
   beds: z.number().int().positive().optional(),
@@ -73,8 +123,9 @@ export const UpdateLeadSchema = z.object({
   price_range: z.string().optional(),
   budget_max: z.number().positive().optional(),
   source: z.string().optional(),
-  status: z.enum(['New', 'Nurture', 'Hot', 'Closed', 'Lost']).optional(),
+  status: z.enum(['new', 'contacted', 'qualified', 'closed', 'lost']).optional(),
   segments: z.array(z.string()).optional(),
+  tags: z.array(z.string()).optional(),
   notes: z.string().optional(),
 });
 

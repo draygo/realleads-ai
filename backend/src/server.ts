@@ -1,147 +1,212 @@
 /**
  * RealLeads.ai Backend Server
- * Main Express application with REST API endpoints, webhook handlers, and schedulers
+ * 
+ * This is the main entry point for the backend application.
+ * It sets up Express, middleware, routes, and starts the server.
+ * 
+ * DEPENDENCIES:
+ * - express: Web framework
+ * - cors: Cross-origin resource sharing
+ * - helmet: Security headers
+ * - body-parser: JSON parsing
+ * - All route files and middleware
+ * 
+ * INTEGRATIONS:
+ * - Connects to Supabase Postgres database
+ * - Provides REST API and natural language command interface
+ * - Handles authentication via Supabase tokens
+ * 
+ * ARCHITECTURE:
+ * 1. Environment validation
+ * 2. Express app setup
+ * 3. Middleware configuration
+ * 4. Route mounting
+ * 5. Error handling
+ * 6. Server startup
  */
 
-import express from 'express';
+import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
-
-import { validateEnv } from './middleware/env-validator';
-import { errorHandler } from './middleware/error-handler';
+import helmet from 'helmet';
+import { validateEnvOrExit } from './middleware/env-validator';
 import { logger, requestLogger } from './middleware/logger';
+import {
+  errorHandler,
+  notFoundHandler,
+} from './middleware/error-handler';
 
-import { commandRouter } from './routes/command';
-import { leadsRouter } from './routes/leads';
-import { communicationsRouter } from './routes/communications';
-import { pendingMessagesRouter } from './routes/pending-messages';
-import { campaignsRouter } from './routes/campaigns';
-import { auditLogRouter } from './routes/audit-log';
-import { healthRouter } from './routes/health';
-import { twilioWebhookRouter } from './routes/twilio-webhook';
-import { authRouter } from './routes/auth';
-import { startSchedulers } from './scheduler';
+// Import routes
+import healthRoutes from './routes/health';
+import authRoutes from './routes/auth';
+import commandRoutes from './routes/command';
+import leadsRoutes from './routes/leads';
 
-// -----------------------------------------------------------------------------
-// ENVIRONMENT SETUP
-// -----------------------------------------------------------------------------
+// ============================================================================
+// Environment Variables
+// ============================================================================
 
-// Load environment variables from process.env (Replit Secrets, .env, etc.)
-dotenv.config();
+// Validate environment variables at startup
+// This will exit the process if required variables are missing
+validateEnvOrExit();
 
-// Validate that required env vars are present (Twilio, Mailchimp, Supabase, etc.)
-const envValidation = validateEnv();
-if (!envValidation.valid) {
-  console.error('❌ Environment validation failed:');
-  envValidation.errors.forEach(err => console.error(`  - ${err}`));
-  process.exit(1);
-}
+const PORT = process.env.PORT || 3001;
+const NODE_ENV = process.env.NODE_ENV || 'development';
+const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173';
 
-// -----------------------------------------------------------------------------
-// EXPRESS APP SETUP
-// -----------------------------------------------------------------------------
+// ============================================================================
+// Express App Setup
+// ============================================================================
 
-// Create the Express application instance
-const app = express();
-const PORT = Number(process.env.PORT) || 4000; // backend dev port
+const app: Express = express();
 
-// -----------------------------------------------------------------------------
-// MIDDLEWARE
-// -----------------------------------------------------------------------------
+// ============================================================================
+// Middleware Configuration
+// ============================================================================
 
-// CORS configuration – for now we allow all origins, which is fine in dev.
-// Later, you can tighten this to your actual frontend origin(s).
-app.use(
-  cors({
-    origin: process.env.CORS_ORIGIN || '*',
-    credentials: true,
-  })
-);
+// Security headers
+app.use(helmet());
 
-// Parse JSON and URL-encoded bodies (up to 10MB)
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// CORS configuration
+const corsOptions = {
+  origin: CORS_ORIGIN.split(',').map((origin) => origin.trim()),
+  credentials: true,
+  optionsSuccessStatus: 200,
+};
+app.use(cors(corsOptions));
 
-// Log each incoming request (method, path, duration, etc.)
+// Body parsing
+app.use(express.json({ limit: '10mb' })); // Parse JSON bodies
+app.use(express.urlencoded({ extended: true, limit: '10mb' })); // Parse URL-encoded bodies
+
+// Request logging
 app.use(requestLogger);
 
-// -----------------------------------------------------------------------------
-// ROUTES
-// -----------------------------------------------------------------------------
+// ============================================================================
+// Routes
+// ============================================================================
 
-// Health check & integration status
-app.use('/health', healthRouter);
+// Health check routes (no auth required)
+app.use('/health', healthRoutes);
 
-// Core API endpoints
-app.use('/command', commandRouter);
-app.use('/api/leads', leadsRouter);
-app.use('/api/auth', authRouter);
-app.use('/api/communications', communicationsRouter);
-app.use('/api/pending-messages', pendingMessagesRouter);
-app.use('/api/campaigns', campaignsRouter);
-app.use('/api/audit-log', auditLogRouter);
+// Auth routes
+app.use('/api/auth', authRoutes);
 
-// Webhook handlers (Twilio WhatsApp, etc.)
-app.use('/twilio', twilioWebhookRouter);
+// Command route (natural language interface)
+app.use('/api/command', commandRoutes); // Alternative path
 
-// Root endpoint – simple JSON describing the service
-app.get('/', (req, res) => {
+// REST API routes
+app.use('/api/leads', leadsRoutes);
+
+// Root route
+app.get('/', (req: Request, res: Response) => {
   res.json({
     name: 'RealLeads.ai Backend',
     version: '1.0.0',
     status: 'running',
     endpoints: {
       health: '/health',
-      integrations: '/health/integrations',
-      command: 'POST /command',
+      auth: '/api/auth/*',
+      command: '/command or /api/command',
       leads: '/api/leads',
-      communications: '/api/communications',
-      pendingMessages: '/api/pending-messages',
-      campaigns: '/api/campaigns',
-      auditLog: '/api/audit-log',
-      twilioWebhook: 'POST /twilio/whatsapp-webhook',
     },
   });
 });
 
-// -----------------------------------------------------------------------------
-// ERROR HANDLING
-// -----------------------------------------------------------------------------
+// ============================================================================
+// Error Handling
+// ============================================================================
 
-// 404 handler for unknown routes
-app.use((req, res) => {
-  res.status(404).json({ error: 'Endpoint not found' });
-});
+// 404 handler (must be before error handler)
+app.use(notFoundHandler);
 
-// Global error handler (catches thrown errors / next(err))
+// Global error handler (must be last)
 app.use(errorHandler);
 
-// -----------------------------------------------------------------------------
-// SERVER STARTUP
-// -----------------------------------------------------------------------------
+// ============================================================================
+// Server Startup
+// ============================================================================
 
-app.listen(PORT, () => {
-  logger.info(`🚀 RealLeads.ai Backend running on port ${PORT}`);
-  logger.info(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  logger.info(`🌍 CORS origin: ${process.env.CORS_ORIGIN || '*'}`);
+/**
+ * Start the Express server
+ * Also handles graceful shutdown
+ */
+function startServer() {
+  const server = app.listen(PORT, () => {
+    logger.info('Server started successfully', {
+      port: PORT,
+      environment: NODE_ENV,
+      corsOrigins: CORS_ORIGIN,
+    });
 
-  // Start scheduled jobs (follow-ups, digests)
-  // Right now this calls a simple stub in scheduler.ts so the app doesn't crash.
-  if (process.env.NODE_ENV !== 'test') {
-    startSchedulers();
-    logger.info('⏰ Schedulers started (follow-ups at 9am PT, digests at 7am PT)');
-  }
-});
+    // Log available routes
+    logger.info('Available routes:', {
+      health: '/health',
+      auth: '/api/auth/provision, /api/auth/me',
+      command: '/command',
+      leads: '/api/leads',
+    });
+  });
 
-// Graceful shutdown on SIGTERM / SIGINT (Replit, Docker, etc.)
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM received, shutting down gracefully...');
-  process.exit(0);
-});
+  // Graceful shutdown handling
+  process.on('SIGTERM', () => {
+    logger.info('SIGTERM received, shutting down gracefully');
 
-process.on('SIGINT', () => {
-  logger.info('SIGINT received, shutting down gracefully...');
-  process.exit(0);
-});
+    server.close(async () => {
+      logger.info('HTTP server closed');
+
+      // Close database connections
+      try {
+        const { db } = await import('./db/client');
+        await db.end();
+        logger.info('Database connections closed');
+      } catch (error) {
+        logger.error('Error closing database connections', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      process.exit(0);
+    });
+
+    // Force shutdown after 30 seconds
+    setTimeout(() => {
+      logger.error('Forced shutdown after timeout');
+      process.exit(1);
+    }, 30000);
+  });
+
+  process.on('SIGINT', () => {
+    logger.info('SIGINT received, shutting down gracefully');
+    server.close(() => {
+      process.exit(0);
+    });
+  });
+
+  // Handle uncaught errors
+  process.on('uncaughtException', (error) => {
+    logger.error('Uncaught exception', {
+      error: error.message,
+      stack: error.stack,
+    });
+    process.exit(1);
+  });
+
+  process.on('unhandledRejection', (reason, promise) => {
+    logger.error('Unhandled promise rejection', {
+      reason,
+      promise,
+    });
+  });
+}
+
+// ============================================================================
+// Start the Server
+// ============================================================================
+
+startServer();
+
+// ============================================================================
+// Export App (for testing)
+// ============================================================================
 
 export default app;

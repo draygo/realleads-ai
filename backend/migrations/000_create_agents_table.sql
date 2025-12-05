@@ -1,32 +1,64 @@
--- Migration: Create agents table
--- This table links Supabase auth users to the internal RealLeads.ai agent system
+-- ============================================================================
+-- Migration: Add agents table for internal user management
+-- 
+-- This table bridges Supabase auth.users with our internal system.
+-- After a user logs in with Google via Supabase, we create an internal
+-- agent record that links to their Supabase user_id.
+-- ============================================================================
 
 -- Create agents table
 CREATE TABLE IF NOT EXISTS agents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  supabase_user_id UUID UNIQUE NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  account_id UUID NOT NULL,
+  supabase_user_id UUID NOT NULL UNIQUE,
   email TEXT NOT NULL,
-  full_name TEXT,
-  avatar_url TEXT,
-  role TEXT DEFAULT 'agent',
-  timezone TEXT DEFAULT 'America/Los_Angeles',
-  preferences JSONB DEFAULT '{}',
-  is_active BOOLEAN DEFAULT TRUE,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+  display_name TEXT,
+  role TEXT NOT NULL DEFAULT 'agent', -- 'agent', 'admin', 'viewer'
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Create index on supabase_user_id for quick lookups
+-- Create index on supabase_user_id for fast lookups
 CREATE INDEX IF NOT EXISTS idx_agents_supabase_user_id ON agents(supabase_user_id);
-
--- Create index on account_id for multi-tenant queries
-CREATE INDEX IF NOT EXISTS idx_agents_account_id ON agents(account_id);
 
 -- Create index on email for lookups
 CREATE INDEX IF NOT EXISTS idx_agents_email ON agents(email);
 
--- Create trigger to update updated_at on row changes
+-- Add comment to table
+COMMENT ON TABLE agents IS 'Internal agent/user records linked to Supabase auth';
+
+-- Add comments to columns
+COMMENT ON COLUMN agents.id IS 'Internal agent ID (UUID)';
+COMMENT ON COLUMN agents.supabase_user_id IS 'Links to auth.users.id in Supabase';
+COMMENT ON COLUMN agents.email IS 'Agent email address (from Supabase auth)';
+COMMENT ON COLUMN agents.display_name IS 'Display name for UI';
+COMMENT ON COLUMN agents.role IS 'Agent role: agent, admin, or viewer';
+
+-- ============================================================================
+-- Row Level Security (RLS) Policies
+-- ============================================================================
+
+-- Enable RLS on agents table
+ALTER TABLE agents ENABLE ROW LEVEL SECURITY;
+
+-- Policy: Agents can read their own record
+CREATE POLICY "Agents can read own record" ON agents
+  FOR SELECT
+  USING (supabase_user_id = auth.uid());
+
+-- Policy: Agents can update their own record
+CREATE POLICY "Agents can update own record" ON agents
+  FOR UPDATE
+  USING (supabase_user_id = auth.uid());
+
+-- Policy: Service role can do anything (for backend API)
+CREATE POLICY "Service role has full access" ON agents
+  FOR ALL
+  USING (auth.role() = 'service_role');
+
+-- ============================================================================
+-- Function: Update updated_at timestamp
+-- ============================================================================
+
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -35,30 +67,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS update_agents_updated_at ON agents;
+-- Trigger: Automatically update updated_at on row update
 CREATE TRIGGER update_agents_updated_at
   BEFORE UPDATE ON agents
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 
--- Row Level Security (RLS)
-ALTER TABLE agents ENABLE ROW LEVEL SECURITY;
-
--- Policy: Agents can read their own data
-CREATE POLICY agents_read_own ON agents
-  FOR SELECT
-  USING (supabase_user_id = auth.uid());
-
--- Policy: Agents can update their own data
-CREATE POLICY agents_update_own ON agents
-  FOR UPDATE
-  USING (supabase_user_id = auth.uid());
-
--- Policy: Service role can do everything (for backend operations)
-CREATE POLICY agents_service_role ON agents
-  FOR ALL
-  USING (auth.role() = 'service_role');
-
--- Grant permissions
-GRANT SELECT, INSERT, UPDATE ON agents TO authenticated;
-GRANT ALL ON agents TO service_role;
+-- ============================================================================
+-- Done!
+-- ============================================================================

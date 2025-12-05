@@ -20,7 +20,18 @@
 import { createLead, Lead } from '../../db/queries';
 import { CreateLeadSchema } from '../validators';
 import { logger } from '../../middleware/logger';
+import { logLeadCreated } from '../../db/audit';
 import { ValidationError } from '../../middleware/error-handler';
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+const HNW_THRESHOLD = 3_000_000; // $3M
+
+// TODO: This should be looked up from the agents table in the future
+// For now, using the default account for all leads
+const DEFAULT_ACCOUNT_ID = 'b0cf6a25-ec83-4c6b-b7c2-2df452fee61f';
 
 // ============================================================================
 // Types
@@ -36,9 +47,10 @@ export interface CreateLeadParams {
   beds?: number;
   baths?: number;
   price_range?: string;
+  budget_min?: number;
   budget_max?: number;
   source?: string;
-  status?: 'New' | 'Nurture' | 'Hot' | 'Closed' | 'Lost';
+  status?: string;
   segments?: string[];
   notes?: string;
 }
@@ -50,12 +62,6 @@ export interface CreateLeadResult {
 }
 
 // ============================================================================
-// Constants
-// ============================================================================
-
-const HNW_THRESHOLD = 3_000_000; // $3M
-
-// ============================================================================
 // Main Action Function
 // ============================================================================
 
@@ -64,13 +70,13 @@ const HNW_THRESHOLD = 3_000_000; // $3M
  * 
  * This function:
  * 1. Validates parameters
- * 2. Checks required fields (must have name, contact, and property info)
+ * 2. Checks required fields (must have name and contact info)
  * 3. Auto-detects HNW status based on budget
  * 4. Creates lead in database
  * 5. Returns created lead
  * 
  * @param params - Lead creation parameters
- * @param agentId - ID of agent creating the lead
+ * @param agentId - ID of agent creating the lead (becomes owner_agent_id)
  * @returns Result with created lead
  * @throws ValidationError if required fields are missing
  * 
@@ -99,24 +105,22 @@ export async function createLeadAction(
   validateRequiredFields(validatedParams);
 
   // Auto-detect HNW status
-  const segments = validatedParams.segments || [];
-  if (validatedParams.budget_max && validatedParams.budget_max > HNW_THRESHOLD) {
-    if (!segments.includes('High Net Worth')) {
-      segments.push('High Net Worth');
-      logger.info('Auto-detected HNW lead', {
-        first_name: validatedParams.first_name,
-        budget_max: validatedParams.budget_max,
-      });
-    }
-  }
+  const segments = detectSegments(validatedParams);
 
-  // Set default status if not provided
-  const status = validatedParams.status || 'New';
+  // Log lead creation attempt
+  logger.info('Creating lead', {
+    agentId,
+    firstName: validatedParams.first_name,
+    email: validatedParams.email,
+    phone: validatedParams.phone,
+    isHNW: segments.includes('High Net Worth'),
+  });
 
+  // Create lead in database
   try {
-    // Create lead in database
     const lead = await createLead({
-      owner_agent_id: agentId,
+      account_id: DEFAULT_ACCOUNT_ID, // Use default account for now
+      owner_agent_id: agentId, // Agent creating the lead becomes the owner
       first_name: validatedParams.first_name,
       last_name: validatedParams.last_name,
       email: validatedParams.email,
@@ -126,26 +130,32 @@ export async function createLeadAction(
       beds: validatedParams.beds,
       baths: validatedParams.baths,
       price_range: validatedParams.price_range,
+      budget_min: validatedParams.budget_min,
       budget_max: validatedParams.budget_max,
-      source: validatedParams.source,
-      status,
+      source: validatedParams.source || 'api',
+      status: validatedParams.status || 'new',
       segments,
       notes: validatedParams.notes,
+      consent_status: 'pending', // Default consent status
     });
 
     logger.info('Lead created successfully', {
       leadId: lead.id,
       agentId,
-      first_name: lead.first_name,
       isHNW: segments.includes('High Net Worth'),
     });
 
+  // Audit log
+  await logLeadCreated(
+    ownerAgentId,
+    DEFAULT_ACCOUNT_ID,
+    newLead.id,
+    params
+  );
     return {
       success: true,
       lead,
-      message: `Lead created for ${lead.first_name}${
-        lead.last_name ? ' ' + lead.last_name : ''
-      }${segments.includes('High Net Worth') ? ' (HNW)' : ''}`,
+      message: `Lead created successfully for ${lead.first_name}${lead.last_name ? ' ' + lead.last_name : ''}`,
     };
   } catch (error) {
     logger.error('Failed to create lead', {
@@ -163,69 +173,48 @@ export async function createLeadAction(
 
 /**
  * Validate that required fields are present
- * The orchestrator should handle this, but we double-check here
  * 
- * Required fields:
- * - first_name
- * - At least one of: {email, phone}
- * - At least one of: {property_address, (neighborhood + beds + baths)}
- * - At least one of: {budget_max, price_range}
+ * A lead must have:
+ * - Name (first_name is required)
+ * - At least one contact method (email OR phone)
  * 
  * @param params - Validated parameters
  * @throws ValidationError if required fields are missing
  */
 function validateRequiredFields(params: CreateLeadParams): void {
-  const errors: string[] = [];
-
-  // Check contact info
+  // Check for contact information
   if (!params.email && !params.phone) {
-    errors.push('Either email or phone is required');
-  }
-
-  // Check property info
-  const hasPropertyAddress = !!params.property_address;
-  const hasNeighborhoodInfo =
-    !!params.neighborhood && params.beds !== undefined && params.baths !== undefined;
-
-  if (!hasPropertyAddress && !hasNeighborhoodInfo) {
-    errors.push(
-      'Either property_address or (neighborhood + beds + baths) is required'
-    );
-  }
-
-  // Check budget info
-  if (!params.budget_max && !params.price_range) {
-    errors.push('Either budget_max or price_range is required');
-  }
-
-  if (errors.length > 0) {
     throw new ValidationError(
-      `Cannot create lead - missing required fields: ${errors.join(', ')}`
+      'Lead must have at least one contact method (email or phone)'
     );
   }
 }
 
 /**
- * Check if a lead is HNW
+ * Detect lead segments based on provided information
  * 
- * @param lead - Lead object or params
- * @returns true if HNW
+ * Current detection rules:
+ * - High Net Worth: budget_max > $3,000,000
+ * - (Future: First Time Buyer, Investor, etc.)
+ * 
+ * @param params - Lead parameters
+ * @returns Array of segment tags
  */
-export function isHNWLead(lead: {
-  budget_max?: number;
-  segments?: string[];
-}): boolean {
-  // Check explicit HNW segment
-  if (lead.segments?.includes('High Net Worth')) {
-    return true;
+function detectSegments(params: CreateLeadParams): string[] {
+  const segments: string[] = [...(params.segments || [])];
+
+  // Auto-detect HNW status
+  if (params.budget_max && params.budget_max > HNW_THRESHOLD) {
+    if (!segments.includes('High Net Worth')) {
+      segments.push('High Net Worth');
+      logger.debug('Auto-detected High Net Worth segment', {
+        budget: params.budget_max,
+        threshold: HNW_THRESHOLD,
+      });
+    }
   }
 
-  // Check budget threshold
-  if (lead.budget_max && lead.budget_max > HNW_THRESHOLD) {
-    return true;
-  }
-
-  return false;
+  return segments;
 }
 
 // ============================================================================
@@ -233,6 +222,3 @@ export function isHNWLead(lead: {
 // ============================================================================
 
 export default createLeadAction;
-
-// Export helper for use in other actions
-export { isHNWLead };

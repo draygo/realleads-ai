@@ -25,6 +25,7 @@
 
 import createLeadAction from './actions/create-lead';
 import getLeadsAction from './actions/get-leads';
+import updateLeadAction from './actions/update-lead';
 import { validateActionParams } from './validators';
 import { logger } from '../middleware/logger';
 import { Action } from '../orchestrator/parser';
@@ -103,31 +104,51 @@ export async function executeActions(
   let allSucceeded = true;
 
   // Execute each action in sequence
-  for (const action of actions) {
+  for (let i = 0; i < actions.length; i++) {
+    const action = actions[i];
+    
     try {
+      // CHAINING: Inject results from previous actions
+      // If params contain placeholder for lead_id, replace with actual value from previous get_leads
+      if (action.type === 'update_lead' && i > 0) {
+        const previousResult = results[i - 1];
+        
+        // Check if previous action was get_leads and returned leads
+        if (previousResult.actionType === 'get_leads' && previousResult.data?.leads?.length > 0) {
+          // If lead_id is missing or is a placeholder, use the first lead from search
+          if (!action.params.lead_id || action.params.lead_id.includes('{{') || action.params.lead_id.includes('from_')) {
+            action.params.lead_id = previousResult.data.leads[0].id;
+            logger.info('Chained action: injected lead_id from previous get_leads', {
+              leadId: action.params.lead_id,
+              agentId: context.agentId,
+            });
+          }
+        }
+      }
+      
       const result = await executeSingleAction(action, context);
       results.push(result);
-
+      
       if (!result.success) {
         allSucceeded = false;
       }
     } catch (error) {
       // If an action fails, log it and continue with remaining actions
       const errorMessage = error instanceof Error ? error.message : String(error);
-
+      
       logger.error('Action execution failed', {
         actionType: action.type,
         error: errorMessage,
         agentId: context.agentId,
       });
-
+      
       results.push({
         success: false,
         actionType: action.type,
         message: `Failed to execute ${action.type}`,
         error: errorMessage,
       });
-
+      
       allSucceeded = false;
     }
   }
@@ -194,10 +215,9 @@ async function executeSingleAction(
       case 'get_leads':
         result = await getLeadsAction(validatedParams, context.agentId);
         break;
-
       case 'update_lead':
-        // TODO: Implement update_lead action
-        throw new Error('update_lead action not yet implemented');
+        result = await updateLeadAction(validatedParams, context.agentId);
+        break;
 
       // ====================================================================
       // Communication Query Actions

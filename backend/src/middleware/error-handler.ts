@@ -1,87 +1,217 @@
-// Global Express error handler middleware for centralized error management.
+/**
+ * Error Handler Middleware - Centralized Error Handling
+ * 
+ * This file provides centralized error handling for Express routes.
+ * All errors thrown in routes will be caught and formatted consistently.
+ * 
+ * DEPENDENCIES:
+ * - backend/src/middleware/logger.ts: For error logging
+ * 
+ * INTEGRATIONS:
+ * - Used by: backend/src/server.ts (as final middleware)
+ * 
+ * ERROR TYPES:
+ * - ValidationError: Bad request / invalid input (400)
+ * - AuthError: Authentication failure (401)
+ * - ForbiddenError: Authorization failure (403)
+ * - NotFoundError: Resource not found (404)
+ * - Error: Generic server error (500)
+ */
 
 import { Request, Response, NextFunction } from 'express';
-// Logger utility for logging errors with stack trace detail.
 import { logger } from './logger';
 
+// ============================================================================
+// Custom Error Classes
+// ============================================================================
+
 /**
- * Custom validation error class for business logic validation failures
+ * Base application error
  */
-export class ValidationError extends Error {
-  statusCode: number = 400;
-  
-  constructor(message: string) {
+export class AppError extends Error {
+  statusCode: number;
+  isOperational: boolean;
+
+  constructor(message: string, statusCode: number = 500) {
     super(message);
+    this.statusCode = statusCode;
+    this.isOperational = true; // Distinguishes operational errors from programming errors
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
+
+/**
+ * Validation error (400)
+ * Use for invalid input, missing required fields, etc.
+ */
+export class ValidationError extends AppError {
+  fields?: Record<string, string>;
+
+  constructor(message: string, fields?: Record<string, string>) {
+    super(message, 400);
     this.name = 'ValidationError';
-    Error.captureStackTrace(this, this.constructor);
+    this.fields = fields;
   }
 }
 
 /**
- * Custom not found error class for missing resources
+ * Authentication error (401)
+ * Use when user is not authenticated
  */
-export class NotFoundError extends Error {
-  statusCode: number = 404;
-  
-  constructor(message: string) {
-    super(message);
+export class AuthError extends AppError {
+  constructor(message: string = 'Authentication required') {
+    super(message, 401);
+    this.name = 'AuthError';
+  }
+}
+
+/**
+ * Authorization error (403)
+ * Use when user is authenticated but not authorized
+ */
+export class ForbiddenError extends AppError {
+  constructor(message: string = 'Access forbidden') {
+    super(message, 403);
+    this.name = 'ForbiddenError';
+  }
+}
+
+/**
+ * Not found error (404)
+ * Use when a resource doesn't exist
+ */
+export class NotFoundError extends AppError {
+  constructor(message: string = 'Resource not found') {
+    super(message, 404);
     this.name = 'NotFoundError';
-    Error.captureStackTrace(this, this.constructor);
   }
 }
 
 /**
- * Custom unauthorized error class for authentication failures
+ * Rate limit error (429)
+ * Use when rate limit is exceeded
  */
-export class UnauthorizedError extends Error {
-  statusCode: number = 401;
-  
-  constructor(message: string) {
-    super(message);
-    this.name = 'UnauthorizedError';
-    Error.captureStackTrace(this, this.constructor);
+export class RateLimitError extends AppError {
+  constructor(message: string = 'Rate limit exceeded') {
+    super(message, 429);
+    this.name = 'RateLimitError';
   }
 }
 
+// ============================================================================
+// Error Handler Middleware
+// ============================================================================
+
 /**
- * Global error handler for Express applications.
- * Catches all errors and sends consistent JSON error responses.
+ * Express error handling middleware
+ * This should be the last middleware in your Express app
  * 
- * @param err - Error thrown in the application
- * @param req - Express request object
- * @param res - Express response object
- * @param next - Express next function (unused)
+ * @example
+ * // In server.ts:
+ * app.use(errorHandler);
  */
 export function errorHandler(
-  err: Error & { statusCode?: number },
+  err: Error | AppError,
   req: Request,
   res: Response,
   next: NextFunction
 ) {
-  // Log the error and its stack trace for debugging
-  logger.error(err.stack ?? err.message, { error: err });
+  // Default to 500 server error
+  let statusCode = 500;
+  let message = 'Internal server error';
+  let errors: any = undefined;
 
-  // Determine HTTP status code based on error type/properties
-  let statusCode = 500; // Default to Internal Server Error
-
-  // Use explicit statusCode property if present
-  if ('statusCode' in err && typeof err.statusCode === 'number') {
+  // Handle known error types
+  if (err instanceof AppError) {
     statusCode = err.statusCode;
+    message = err.message;
+
+    // Include validation field errors if present
+    if (err instanceof ValidationError && err.fields) {
+      errors = err.fields;
+    }
   } else if (err.name === 'ValidationError') {
-    // Set specific status codes based on common error types
+    // Handle Zod or other validation errors
     statusCode = 400;
+    message = 'Validation failed';
+    errors = (err as any).errors || err.message;
   } else if (err.name === 'UnauthorizedError') {
+    // Handle JWT errors from express-jwt
     statusCode = 401;
-  } else if (err.name === 'NotFoundError') {
-    statusCode = 404;
+    message = 'Invalid or expired token';
+  } else if (err.message) {
+    // Use error message for other known errors
+    message = err.message;
   }
 
-  // Build response object, conditionally including stack trace in development
+  // Log the error
+  logger.error('Error handled', {
+    statusCode,
+    message: err.message,
+    stack: err.stack,
+    url: req.originalUrl,
+    method: req.method,
+    ip: req.ip,
+    userId: (req as any).user?.id,
+  });
+
+  // Don't expose internal error details in production
+  const isDevelopment = process.env.NODE_ENV === 'development';
+
+  // Send error response
   res.status(statusCode).json({
     error: {
-      message: err.message,
-      status: statusCode,
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
+      message,
+      ...(errors && { errors }),
+      ...(isDevelopment && { stack: err.stack }), // Only in development
     },
   });
 }
+
+/**
+ * Async route wrapper
+ * Wraps async route handlers to catch errors automatically
+ * 
+ * @example
+ * app.get('/api/leads', asyncHandler(async (req, res) => {
+ *   const leads = await getLeads();
+ *   res.json(leads);
+ * }));
+ */
+export function asyncHandler(
+  fn: (req: Request, res: Response, next: NextFunction) => Promise<any>
+) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
+}
+
+/**
+ * 404 handler for unmatched routes
+ * Add this before the error handler middleware
+ * 
+ * @example
+ * // In server.ts:
+ * app.use(notFoundHandler);
+ * app.use(errorHandler);
+ */
+export function notFoundHandler(req: Request, res: Response, next: NextFunction) {
+  const error = new NotFoundError(`Route not found: ${req.method} ${req.originalUrl}`);
+  next(error);
+}
+
+// ============================================================================
+// Export
+// ============================================================================
+
+export default {
+  errorHandler,
+  asyncHandler,
+  notFoundHandler,
+  AppError,
+  ValidationError,
+  AuthError,
+  ForbiddenError,
+  NotFoundError,
+  RateLimitError,
+};
