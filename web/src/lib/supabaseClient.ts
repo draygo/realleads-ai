@@ -1,8 +1,15 @@
-// web/src/lib/supabaseClient.ts
-import { createClient } from '@supabase/supabase-js';
+// Supabase client for the frontend.
+// Reads the project URL and anon key from Vite env variables.
+import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL!;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY!;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+if (!supabaseUrl) {
+  throw new Error("supabaseUrl is required.");
+}
+if (!supabaseAnonKey) {
+  throw new Error("supabaseAnonKey is required.");
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
-// detectSessionInUrl is true by default, so it will parse the access_token/#code in the URL
