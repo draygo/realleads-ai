@@ -23,35 +23,14 @@
 
 import { db } from './client';
 import { logger } from '../middleware/logger';
+import type { NewLeadInput, LeadRow } from './schema';
 
 // ============================================================================
 // Types (matching actual database schema)
 // ============================================================================
 
-export interface Lead {
-  id: string;
-  account_id: string;
-  owner_agent_id?: string;
-  first_name: string;
-  last_name?: string;
-  email?: string;
-  phone?: string;
-  property_address?: string;
-  neighborhood?: string;
-  beds?: number;
-  baths?: number;
-  price_range?: string;
-  budget_min?: number;
-  budget_max?: number;
-  source?: string;
-  status: string; // 'new', 'contacted', 'qualified', 'closed', 'lost'
-  segments?: string[]; // ['High Net Worth', 'First Time Buyer', etc.]
-  notes?: string;
-  consent_status: string; // 'pending', 'granted', 'denied'
-  created_at: Date;
-  updated_at: Date;
-  created_date: Date;
-}
+// Re-export schema types for convenience
+export type { LeadRow, NewLeadInput } from './schema';
 
 export interface Communication {
   id: string;
@@ -90,12 +69,12 @@ export interface PendingMessage {
 /**
  * Create a new lead
  * 
- * @param lead - Lead data (without id, created_at, updated_at)
- * @returns Created lead with generated id and timestamps
+ * @param lead - Lead data (NewLeadInput type)
+ * @returns Created lead with generated id and timestamps (LeadRow type)
  */
 export async function createLead(
-  lead: Omit<Lead, 'id' | 'created_at' | 'updated_at' | 'created_date'>
-): Promise<Lead> {
+  lead: NewLeadInput
+): Promise<LeadRow> {
   const query = `
     INSERT INTO leads (
       account_id, owner_agent_id, first_name, last_name, email, phone,
@@ -133,7 +112,7 @@ export async function createLead(
   ];
 
   try {
-    const result = await db.query<Lead>(query, values);
+    const result = await db.query<LeadRow>(query, values);
     logger.info('Lead created', { 
       leadId: result.rows[0].id, 
       accountId: lead.account_id,
@@ -170,7 +149,7 @@ export async function getLeadsByAgent(
     limit?: number;
     offset?: number;
   }
-): Promise<Lead[]> {
+): Promise<LeadRow[]> {
   let query = `
     SELECT * FROM leads
     WHERE owner_agent_id = $1
@@ -262,7 +241,7 @@ export async function getLeadsByAgent(
   }
 
   try {
-    const result = await db.query<Lead>(query, params);
+    const result = await db.query<LeadRow>(query, params);
     logger.debug('Leads fetched', {
       ownerAgentId,
       count: result.rowCount,
@@ -289,14 +268,14 @@ export async function getLeadsByAgent(
 export async function getLeadById(
   leadId: string,
   ownerAgentId: string
-): Promise<Lead | null> {
+): Promise<LeadRow | null> {
   const query = `
     SELECT * FROM leads
     WHERE id = $1 AND owner_agent_id = $2
   `;
 
   try {
-    const result = await db.query<Lead>(query, [leadId, ownerAgentId]);
+    const result = await db.query<LeadRow>(query, [leadId, ownerAgentId]);
     return result.rows[0] || null;
   } catch (error) {
     logger.error('Failed to fetch lead by ID', {
@@ -319,8 +298,8 @@ export async function getLeadById(
 export async function updateLead(
   leadId: string,
   ownerAgentId: string,
-  updates: Partial<Omit<Lead, 'id' | 'account_id' | 'owner_agent_id' | 'created_at' | 'updated_at' | 'created_date'>>
-): Promise<Lead> {
+  updates: Partial<Omit<LeadRow, 'id' | 'account_id' | 'owner_agent_id' | 'created_at' | 'updated_at' | 'created_date'>>
+): Promise<LeadRow> {
   // Build dynamic UPDATE query based on provided fields
   const fields: string[] = [];
   const values: any[] = [];
@@ -346,7 +325,7 @@ export async function updateLead(
   `;
 
   try {
-    const result = await db.query<Lead>(query, values);
+    const result = await db.query<LeadRow>(query, values);
     if (result.rowCount === 0) {
       throw new Error(`Lead not found or access denied: ${leadId}`);
     }
