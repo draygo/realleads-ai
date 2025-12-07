@@ -1,3 +1,4 @@
+import "./config/loadEnv";
 /**
  * RealLeads.ai Backend Server
  * 
