@@ -130,6 +130,7 @@ Visit `http://localhost:3000/health/integrations` to see which services are conn
 Step-by-step instructions for:
 - Supabase project creation
 - Google OAuth configuration
+- (Optional / future) GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET (for custom OAuth flows; **not required when using Supabase Auth providers**).
 - Twilio Sandbox enablement
 - Mailchimp audience setup
 - Mandrill DNS/DKIM/SPF verification
