@@ -203,7 +203,7 @@ router.get(
  * - price_range: string (optional)
  * - budget_max: number (optional)
  * - source: string (optional)
- * - status: string (optional, default: 'new')
+ * - status: string (optional, default: 'New')
  * - segments: string[] (optional)
  * - tags: string[] (optional)
  * - notes: string (optional)
@@ -250,7 +250,7 @@ router.post(
       price_range: leadData.price_range,
       budget_max: leadData.budget_max,
       source: leadData.source || 'manual',
-      status: leadData.status || 'new',
+      status: leadData.status || 'New',
       segments,
       tags: leadData.tags,
       notes: leadData.notes,

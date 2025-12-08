@@ -160,6 +160,13 @@ export async function createLeadAction(
       market_area: null,
       last_communication_date: null,
       next_communication_date: null,
+      subject_property_id: null,
+      subject_beds: null,
+      subject_baths: null,
+      subject_sqft: null,
+      subject_list_price: null,
+      subject_list_price_source: null,
+      zenlist_collab_link: null,
     };
 
     const lead = await createLead(newLeadInput);

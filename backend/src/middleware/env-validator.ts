@@ -21,7 +21,9 @@
  * - MANDRILL_* : For email
  * - And others...
  */
-
+// Load environment variables from .env early in the lifecycle
+import dotenv from 'dotenv';
+dotenv.config();
 import { logger } from './logger';
 
 // ============================================================================

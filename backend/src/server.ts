@@ -1,4 +1,3 @@
-import "./config/loadEnv";
 /**
  * RealLeads.ai Backend Server
  * 
@@ -26,6 +25,14 @@ import "./config/loadEnv";
  * 6. Server startup
  */
 
+// Load environment variables from .env when running locally
+// src/server.ts
+// Entry point for the backend API server. We import the environment loader first
+// so that all process.env variables are available to the rest of the code.
+
+import "./config/loadEnv";
+import dotenv from 'dotenv';
+dotenv.config();
 import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';

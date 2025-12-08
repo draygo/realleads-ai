@@ -85,7 +85,7 @@ export const CreateLeadSchema = z.object({
   budget_min: z.number().positive().optional(),
   budget_max: z.number().positive().optional(),
   source: z.string().optional(),
-  status: z.enum(['new', 'contacted', 'qualified', 'closed', 'lost']).optional(),
+  status: z.enum(['New', 'Nurture', 'Hot', 'Closed', 'Lost']).optional(),
   segments: z.array(z.string()).optional(),
   tags: z.array(z.string()).optional(),
   notes: z.string().optional(),
@@ -96,7 +96,7 @@ export const CreateLeadSchema = z.object({
  * Allows filtering by various criteria
  */
 export const GetLeadsSchema = z.object({
-  status: z.enum(['new', 'contacted', 'qualified', 'closed', 'lost']).optional(),
+  status: z.enum(['New', 'Nurture', 'Hot', 'Closed', 'Lost']).optional(),
   segments: z.array(z.string()).optional(),
   tags: z.array(z.string()).optional(),
   email: z.string().optional(), // Filter by exact email
@@ -123,10 +123,19 @@ export const UpdateLeadSchema = z.object({
   price_range: z.string().optional(),
   budget_max: z.number().positive().optional(),
   source: z.string().optional(),
-  status: z.enum(['new', 'contacted', 'qualified', 'closed', 'lost']).optional(),
+  status: z.enum(['New', 'Nurture', 'Hot', 'Closed', 'Lost']).optional(),
   segments: z.array(z.string()).optional(),
   tags: z.array(z.string()).optional(),
   notes: z.string().optional(),
+});
+
+/**
+ * Validator for enrich_property_for_lead action
+ * Enriches a subject property for a lead based on address or URL
+ */
+export const EnrichPropertyForLeadSchema = z.object({
+  lead_id: z.string().uuid('Invalid lead ID format'),
+  raw_input: z.string().min(1, 'raw_input is required and must be non-empty'),
 });
 
 // ============================================================================
@@ -250,6 +259,8 @@ export function validateActionParams(
         return GetLeadsSchema.parse(params);
       case 'update_lead':
         return UpdateLeadSchema.parse(params);
+      case 'enrich_property_for_lead':
+        return EnrichPropertyForLeadSchema.parse(params);
 
       // Communication actions
       case 'get_communications':
@@ -300,6 +311,7 @@ export default {
   CreateLeadSchema,
   GetLeadsSchema,
   UpdateLeadSchema,
+  EnrichPropertyForLeadSchema,
 
   // Communication schemas
   GetCommunicationsSchema,

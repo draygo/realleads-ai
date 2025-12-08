@@ -30,6 +30,7 @@ const ActionTypeSchema = z.enum([
   'create_lead',
   'get_leads',
   'update_lead',
+  'enrich_property_for_lead',
   'get_communications',
   'draft_initial_followup',
   'create_pending_message',

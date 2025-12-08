@@ -23,7 +23,7 @@
 
 import { db } from './client';
 import { logger } from '../middleware/logger';
-import type { NewLeadInput, LeadRow } from './schema';
+import type { NewLeadInput, LeadRow, PropertyRow, UUID } from './schema';
 
 // ============================================================================
 // Types (matching actual database schema)
@@ -105,7 +105,7 @@ export async function createLead(
     lead.budget_min || null,
     lead.budget_max || null,
     lead.source || 'api',
-    lead.status || 'new',
+    lead.status || 'New',
     lead.segments || [],
     lead.notes || null,
     lead.consent_status || 'pending',
@@ -427,6 +427,260 @@ export async function getCommunicationsByLead(
 }
 
 // ============================================================================
+// Property Queries
+// ============================================================================
+
+/**
+ * Upsert a property from enrichment data
+ * 
+ * Matches by:
+ * - Normalized address_full (case-insensitive)
+ * - zenlist_mls_id (if present)
+ * - zillow_zpid (if present)
+ * 
+ * If match found: updates existing property
+ * If no match: creates new property
+ * 
+ * @param propertyData - Property data from enrichment
+ * @returns Upserted property row
+ */
+export async function upsertPropertyFromEnrichment(
+  propertyData: Omit<PropertyRow, 'id' | 'created_at' | 'updated_at'>
+): Promise<PropertyRow> {
+  // Try to find existing property by address_full, mls_id, or zpid
+  let existingProperty: PropertyRow | null = null;
+
+  // First try by MLS ID if present
+  if (propertyData.zenlist_mls_id) {
+    const mlsQuery = `
+      SELECT * FROM properties
+      WHERE zenlist_mls_id = $1
+      LIMIT 1
+    `;
+    const mlsResult = await db.query<PropertyRow>(mlsQuery, [propertyData.zenlist_mls_id]);
+    if (mlsResult.rows.length > 0) {
+      existingProperty = mlsResult.rows[0];
+    }
+  }
+
+  // Try by ZPID if not found and ZPID present
+  if (!existingProperty && propertyData.zillow_zpid) {
+    const zpidQuery = `
+      SELECT * FROM properties
+      WHERE zillow_zpid = $1
+      LIMIT 1
+    `;
+    const zpidResult = await db.query<PropertyRow>(zpidQuery, [propertyData.zillow_zpid]);
+    if (zpidResult.rows.length > 0) {
+      existingProperty = zpidResult.rows[0];
+    }
+  }
+
+  // Try by normalized address if still not found
+  if (!existingProperty) {
+    const addressQuery = `
+      SELECT * FROM properties
+      WHERE LOWER(address_full) = LOWER($1)
+      LIMIT 1
+    `;
+    const addressResult = await db.query<PropertyRow>(addressQuery, [propertyData.address_full]);
+    if (addressResult.rows.length > 0) {
+      existingProperty = addressResult.rows[0];
+    }
+  }
+
+  if (existingProperty) {
+    // Update existing property
+    const updateQuery = `
+      UPDATE properties
+      SET
+        address_full = $1,
+        street = $2,
+        unit = $3,
+        city = $4,
+        state = $5,
+        postal_code = $6,
+        latitude = $7,
+        longitude = $8,
+        beds = $9,
+        baths = $10,
+        sqft = $11,
+        lot_sqft = $12,
+        property_type = $13,
+        year_built = $14,
+        hoa_fees = $15,
+        list_price = $16,
+        list_price_source = $17,
+        last_sold_price = $18,
+        last_sold_date = $19,
+        tax_assessed_value = $20,
+        provider_primary = $21,
+        provider_fallbacks = $22,
+        zenlist_mls_id = COALESCE($23, zenlist_mls_id),
+        zillow_zpid = COALESCE($24, zillow_zpid),
+        attom_property_id = COALESCE($25, attom_property_id),
+        provider_payload = $26,
+        updated_at = NOW()
+      WHERE id = $27
+      RETURNING *
+    `;
+
+    const values = [
+      propertyData.address_full,
+      propertyData.street,
+      propertyData.unit,
+      propertyData.city,
+      propertyData.state,
+      propertyData.postal_code,
+      propertyData.latitude,
+      propertyData.longitude,
+      propertyData.beds,
+      propertyData.baths,
+      propertyData.sqft,
+      propertyData.lot_sqft,
+      propertyData.property_type,
+      propertyData.year_built,
+      propertyData.hoa_fees,
+      propertyData.list_price,
+      propertyData.list_price_source,
+      propertyData.last_sold_price,
+      propertyData.last_sold_date,
+      propertyData.tax_assessed_value,
+      propertyData.provider_primary,
+      propertyData.provider_fallbacks,
+      propertyData.zenlist_mls_id,
+      propertyData.zillow_zpid,
+      propertyData.attom_property_id,
+      propertyData.provider_payload,
+      existingProperty.id,
+    ];
+
+    const result = await db.query<PropertyRow>(updateQuery, values);
+    logger.info('Property updated', { propertyId: result.rows[0].id });
+    return result.rows[0];
+  } else {
+    // Insert new property
+    const insertQuery = `
+      INSERT INTO properties (
+        address_full, street, unit, city, state, postal_code,
+        latitude, longitude, beds, baths, sqft, lot_sqft,
+        property_type, year_built, hoa_fees,
+        list_price, list_price_source, last_sold_price, last_sold_date,
+        tax_assessed_value,
+        provider_primary, provider_fallbacks,
+        zenlist_mls_id, zillow_zpid, attom_property_id,
+        provider_payload
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6,
+        $7, $8, $9, $10, $11, $12,
+        $13, $14, $15,
+        $16, $17, $18, $19,
+        $20,
+        $21, $22,
+        $23, $24, $25,
+        $26
+      )
+      RETURNING *
+    `;
+
+    const values = [
+      propertyData.address_full,
+      propertyData.street,
+      propertyData.unit,
+      propertyData.city,
+      propertyData.state,
+      propertyData.postal_code,
+      propertyData.latitude,
+      propertyData.longitude,
+      propertyData.beds,
+      propertyData.baths,
+      propertyData.sqft,
+      propertyData.lot_sqft,
+      propertyData.property_type,
+      propertyData.year_built,
+      propertyData.hoa_fees,
+      propertyData.list_price,
+      propertyData.list_price_source,
+      propertyData.last_sold_price,
+      propertyData.last_sold_date,
+      propertyData.tax_assessed_value,
+      propertyData.provider_primary,
+      propertyData.provider_fallbacks,
+      propertyData.zenlist_mls_id,
+      propertyData.zillow_zpid,
+      propertyData.attom_property_id,
+      propertyData.provider_payload,
+    ];
+
+    const result = await db.query<PropertyRow>(insertQuery, values);
+    logger.info('Property created', { propertyId: result.rows[0].id });
+    return result.rows[0];
+  }
+}
+
+/**
+ * Update lead with subject property information
+ * 
+ * Updates the denormalized subject_property_* fields on the lead
+ * for quick access without joins.
+ * 
+ * @param leadId - Lead ID to update
+ * @param updates - Subject property fields to update
+ * @returns Updated lead row
+ */
+export async function updateLeadSubjectProperty(
+  leadId: UUID,
+  updates: {
+    subject_property_id: UUID | null;
+    subject_beds: number | null;
+    subject_baths: number | null;
+    subject_sqft: number | null;
+    subject_list_price: number | null;
+    subject_list_price_source: string | null;
+  }
+): Promise<LeadRow> {
+  const query = `
+    UPDATE leads
+    SET
+      subject_property_id = $1,
+      subject_beds = $2,
+      subject_baths = $3,
+      subject_sqft = $4,
+      subject_list_price = $5,
+      subject_list_price_source = $6,
+      updated_at = NOW()
+    WHERE id = $7
+    RETURNING *
+  `;
+
+  const values = [
+    updates.subject_property_id,
+    updates.subject_beds,
+    updates.subject_baths,
+    updates.subject_sqft,
+    updates.subject_list_price,
+    updates.subject_list_price_source,
+    leadId,
+  ];
+
+  try {
+    const result = await db.query<LeadRow>(query, values);
+    if (result.rowCount === 0) {
+      throw new Error(`Lead not found: ${leadId}`);
+    }
+    logger.info('Lead subject property updated', { leadId, propertyId: updates.subject_property_id });
+    return result.rows[0];
+  } catch (error) {
+    logger.error('Failed to update lead subject property', {
+      error: error instanceof Error ? error.message : String(error),
+      leadId,
+    });
+    throw error;
+  }
+}
+
+
+// ============================================================================
 // Export all query functions
 // ============================================================================
 
@@ -439,4 +693,7 @@ export default {
   // Communication queries
   createCommunication,
   getCommunicationsByLead,
+  // Property queries
+  upsertPropertyFromEnrichment,
+  updateLeadSubjectProperty,
 };

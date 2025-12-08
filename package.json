@@ -26,6 +26,8 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.81.1",
-    "react-router-dom": "^7.9.6"
+    "dotenv": "^17.2.3",
+    "react-router-dom": "^7.9.6",
+    "twilio": "^5.10.7"
   }
 }

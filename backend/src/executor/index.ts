@@ -26,6 +26,7 @@
 import createLeadAction from './actions/create-lead';
 import getLeadsAction from './actions/get-leads';
 import updateLeadAction from './actions/update-lead';
+import enrichPropertyForLeadAction from './actions/enrich-property-for-lead';
 import { validateActionParams } from './validators';
 import { logger } from '../middleware/logger';
 import { Action } from '../orchestrator/parser';
@@ -219,6 +220,10 @@ async function executeSingleAction(
         result = await updateLeadAction(validatedParams, context.agentId);
         break;
 
+      case 'enrich_property_for_lead':
+        result = await enrichPropertyForLeadAction(validatedParams);
+        break;
+
       // ====================================================================
       // Communication Query Actions
       // ====================================================================
@@ -308,6 +313,3 @@ async function executeSingleAction(
 export default {
   executeActions,
 };
-
-// Export types
-export type { ExecutionContext, ActionResult, ExecutionResult };
